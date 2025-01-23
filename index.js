@@ -8,45 +8,77 @@ require('dotenv').config();
 const app = express();
 
 // ======================
-// Middleware
+// Security Middleware
 // ======================
 app.use(helmet());
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type']
+}));
 
-// Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per window
-  message: 'Too many requests from this IP, please try again later'
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: 'Too many requests from this IP'
 });
 app.use(limiter);
 
 // ======================
 // Database Setup
 // ======================
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch((error) => {
-    console.error('MongoDB connection error:', error.message);
-    process.exit(1);
-  });
-
-// ======================
-// Routes
-// ======================
-
-// Root route
-app.get('/', (req, res) => {
-  res.send('Usage Tracking Server is running!');
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+})
+.then(() => console.log('Connected to MongoDB'))
+.catch((error) => {
+  console.error('MongoDB connection error:', error.message);
+  process.exit(1);
 });
 
-// Track User Action (POST)
+// ======================
+// Data Models
+// ======================
+const userActionSchema = new mongoose.Schema({
+  userId: {
+    type: String,
+    required: true,
+    index: true
+  },
+  action: {
+    type: String,
+    enum: ['read', 'write'],
+    required: true
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now,
+    index: true
+  }
+});
+
+const UserAction = mongoose.model('UserAction', userActionSchema);
+
+// ======================
+// API Endpoints
+// ======================
+app.use(express.json());
+
+// Health Check
+app.get('/v1/status', (req, res) => {
+  res.json({
+    status: 'operational',
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Track Action
 app.post('/v1/actions', async (req, res) => {
   try {
     const { userId, action } = req.body;
 
-    // Validation
     if (!userId || !action) {
       return res.status(400).json({
         error: 'Missing required fields',
@@ -76,31 +108,33 @@ app.post('/v1/actions', async (req, res) => {
     console.error('Tracking error:', error.message);
     res.status(500).json({
       status: 'error',
-      message: 'Internal server error',
-      ...(process.env.NODE_ENV === 'development' && { error: error.message })
+      message: 'Internal server error'
     });
   }
 });
 
-// Get User Analytics (GET)
+// Get Analytics
 app.get('/v1/analytics/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    const { period = '30d' } = req.query;
+    const { period = '30' } = req.query;
 
-    // Date calculations
-    const dateFilter = {};
-    const periodDays = parseInt(period) || 30;
-    
-    if (periodDays) {
-      dateFilter.$gte = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000);
+    if (!userId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'User ID required'
+      });
     }
 
-    // Aggregation pipeline
+    const periodDays = parseInt(period) || 30;
+    const dateFilter = {
+      $gte: new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000)
+    };
+
     const stats = await UserAction.aggregate([
       {
         $match: {
-          userId,
+          userId: userId,
           timestamp: dateFilter
         }
       },
@@ -121,55 +155,39 @@ app.get('/v1/analytics/:userId', async (req, res) => {
       }
     ]);
 
-    // Format response
-    const result = {
+    const result = stats.reduce((acc, curr) => {
+      acc[curr.action] = {
+        count: curr.count,
+        lastActivity: curr.lastActivity
+      };
+      return acc;
+    }, { 
       read: { count: 0, lastActivity: null },
       write: { count: 0, lastActivity: null }
-    };
-
-    stats.forEach(stat => {
-      result[stat.action] = {
-        count: stat.count,
-        lastActivity: stat.lastActivity
-      };
     });
 
-    res.status(200).json({
+    res.json({
       status: 'success',
       data: result
     });
 
   } catch (error) {
+    console.error('Analytics error:', error.message);
     res.status(500).json({
       status: 'error',
-      message: 'Internal server error'
+      message: 'Failed to fetch analytics'
     });
   }
-});
-
-// Health Check Endpoint
-app.get('/v1/status', (req, res) => {
-  const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
-  
-  res.json({
-    status: 'operational',
-    version: process.env.npm_package_version,
-    uptime: process.uptime(),
-    database: dbStatus,
-    timestamp: new Date().toISOString()
-  });
 });
 
 // ======================
 // Error Handling
 // ======================
 app.use((err, req, res, next) => {
-  console.error('Global error handler:', err);
-  
+  console.error('Server error:', err);
   res.status(500).json({
     status: 'error',
-    message: 'Something went wrong!',
-    ...(process.env.NODE_ENV === 'development' && { error: err.message })
+    message: 'Internal server error'
   });
 });
 
@@ -181,13 +199,11 @@ const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received. Shutting down gracefully');
+  console.log('Shutting down gracefully');
   server.close(() => {
-    console.log('HTTP server closed');
     mongoose.connection.close(false, () => {
-      console.log('MongoDB connection closed');
+      console.log('Server shutdown complete');
       process.exit(0);
     });
   });
