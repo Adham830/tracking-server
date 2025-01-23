@@ -5,44 +5,60 @@ require('dotenv').config();
 
 const app = express();
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// Simplified CORS for native apps
+app.use(cors({
+  origin: '*', // Allow all origins (safe for mobile/desktop apps)
+  methods: ['POST'], // Only needed methods
+  allowedHeaders: ['Content-Type']
+}));
 
 // MongoDB connection
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('Connected to MongoDB'))
-  .catch((error) => console.error('MongoDB connection error:', error));
+  .catch((error) => console.error('MongoDB error:', error));
 
-// Define a schema and model for tracking user actions
+// User Action Schema
 const userActionSchema = new mongoose.Schema({
-  userId: String,
-  action: String, // "read" or "write"
-  timestamp: { type: Date, default: Date.now },
+  userId: {
+    type: String,
+    required: true
+  },
+  action: {
+    type: String,
+    enum: ['read', 'write'],
+    required: true
+  },
+  timestamp: { 
+    type: Date, 
+    default: Date.now 
+  }
 });
 
 const UserAction = mongoose.model('UserAction', userActionSchema);
 
-// API route to log user actions
+// Tracking endpoint
 app.post('/track', async (req, res) => {
-  const { userId, action } = req.body;
-
-  if (!userId || !action) {
-    return res.status(400).json({ error: 'Missing userId or action' });
-  }
-
   try {
+    const { userId, action } = req.body;
+
+    if (!userId || !action) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
     const newAction = new UserAction({ userId, action });
     await newAction.save();
-    res.status(200).json({ message: 'Action logged successfully' });
+    
+    res.status(200).json({ success: true });
+
   } catch (error) {
-    res.status(500).json({ error: 'Failed to log action' });
+    console.error('Tracking error:', error);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Health check route
+// Health check
 app.get('/', (req, res) => {
-  res.send('Tracking server is running');
+  res.sendStatus(200);
 });
 
 const PORT = process.env.PORT || 3000;
