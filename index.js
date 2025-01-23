@@ -13,13 +13,14 @@ const app = express();
 app.use(helmet());
 app.use(cors({
   origin: '*',
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type']
 }));
 
+// Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests
   message: 'Too many requests from this IP'
 });
 app.use(limiter);
@@ -31,14 +32,14 @@ mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true
 })
-.then(() => console.log('Connected to MongoDB'))
+.then(() => console.log('✅ Connected to MongoDB'))
 .catch((error) => {
-  console.error('MongoDB connection error:', error.message);
+  console.error('❌ MongoDB connection error:', error.message);
   process.exit(1);
 });
 
 // ======================
-// Data Models
+// Data Model
 // ======================
 const userActionSchema = new mongoose.Schema({
   userId: {
@@ -61,24 +62,29 @@ const userActionSchema = new mongoose.Schema({
 const UserAction = mongoose.model('UserAction', userActionSchema);
 
 // ======================
-// API Endpoints
+// API Routes
 // ======================
 app.use(express.json());
 
-// Health Check
-app.get('/v1/status', (req, res) => {
+// Root endpoint
+app.get('/', (req, res) => {
   res.json({
     status: 'operational',
-    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    timestamp: new Date().toISOString()
+    version: '1.0.0',
+    endpoints: {
+      trackAction: 'POST /v1/actions',
+      getAnalytics: 'GET /v1/analytics/:userId',
+      healthCheck: 'GET /v1/status'
+    }
   });
 });
 
-// Track Action
+// Track user action
 app.post('/v1/actions', async (req, res) => {
   try {
     const { userId, action } = req.body;
 
+    // Validation
     if (!userId || !action) {
       return res.status(400).json({
         error: 'Missing required fields',
@@ -93,6 +99,7 @@ app.post('/v1/actions', async (req, res) => {
       });
     }
 
+    // Save to database
     const newAction = new UserAction({ userId, action });
     await newAction.save();
 
@@ -113,12 +120,13 @@ app.post('/v1/actions', async (req, res) => {
   }
 });
 
-// Get Analytics
+// Get user analytics
 app.get('/v1/analytics/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const { period = '30' } = req.query;
 
+    // Validate input
     if (!userId) {
       return res.status(400).json({
         status: 'error',
@@ -126,11 +134,13 @@ app.get('/v1/analytics/:userId', async (req, res) => {
       });
     }
 
+    // Date filtering
     const periodDays = parseInt(period) || 30;
     const dateFilter = {
       $gte: new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000)
     };
 
+    // Analytics pipeline
     const stats = await UserAction.aggregate([
       {
         $match: {
@@ -155,13 +165,14 @@ app.get('/v1/analytics/:userId', async (req, res) => {
       }
     ]);
 
-    const result = stats.reduce((acc, curr) => {
-      acc[curr.action] = {
+    // Format response
+    const result = stats.reduce((acc, curr) => ({
+      ...acc,
+      [curr.action]: {
         count: curr.count,
         lastActivity: curr.lastActivity
-      };
-      return acc;
-    }, { 
+      }
+    }), {
       read: { count: 0, lastActivity: null },
       write: { count: 0, lastActivity: null }
     });
@@ -180,9 +191,25 @@ app.get('/v1/analytics/:userId', async (req, res) => {
   }
 });
 
+// Health check
+app.get('/v1/status', (req, res) => {
+  res.json({
+    status: 'operational',
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // ======================
 // Error Handling
 // ======================
+app.use((req, res) => {
+  res.status(404).json({
+    status: 'error',
+    message: 'Endpoint not found'
+  });
+});
+
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
   res.status(500).json({
@@ -196,14 +223,15 @@ app.use((err, req, res, next) => {
 // ======================
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
 
+// Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('Shutting down gracefully');
+  console.log('🛑 Shutting down gracefully...');
   server.close(() => {
     mongoose.connection.close(false, () => {
-      console.log('Server shutdown complete');
+      console.log('🔌 All connections closed');
       process.exit(0);
     });
   });
