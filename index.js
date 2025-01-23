@@ -12,11 +12,9 @@ const app = express();
 // ======================
 app.use(helmet());
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://your-flutter-app.com'] 
-    : '*',
+  origin: '*', // Allow all origins
   methods: ['POST', 'GET'],
-  allowedHeaders: ['Content-Type', 'X-API-Key']
+  allowedHeaders: ['Content-Type']
 }));
 
 const limiter = rateLimit({
@@ -72,20 +70,12 @@ const UserAction = mongoose.model('UserAction', userActionSchema);
 // ======================
 app.use(express.json({ limit: '10kb' }));
 
-const validateAPIKey = (req, res, next) => {
-  const apiKey = req.headers['x-api-key'];
-  if (process.env.NODE_ENV === 'production' && apiKey !== process.env.API_KEY) {
-    return res.status(401).json({ error: 'Invalid API key' });
-  }
-  next();
-};
-
 // ======================
 // API Endpoints
 // ======================
 
 // Track User Action (POST)
-app.post('/v1/actions', validateAPIKey, async (req, res) => {
+app.post('/v1/actions', async (req, res) => {
   try {
     const { userId, action } = req.body;
 
@@ -126,7 +116,7 @@ app.post('/v1/actions', validateAPIKey, async (req, res) => {
 });
 
 // Get User Analytics (GET)
-app.get('/v1/analytics/:userId', validateAPIKey, async (req, res) => {
+app.get('/v1/analytics/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const { period = '30d' } = req.query;
