@@ -8,8 +8,9 @@ require('dotenv').config();
 const app = express();
 
 // ======================
-// Security Middleware
+// Security Configuration
 // ======================
+app.set('trust proxy', 1); // Trust Vercel's proxy
 app.use(helmet());
 app.use(cors({
   origin: '*',
@@ -19,8 +20,8 @@ app.use(cors({
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Too many requests from this IP'
 });
 app.use(limiter);
@@ -28,15 +29,12 @@ app.use(limiter);
 // ======================
 // Database Setup
 // ======================
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
-.then(() => console.log('✅ Connected to MongoDB'))
-.catch((error) => {
-  console.error('❌ MongoDB connection error:', error.message);
-  process.exit(1);
-});
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('✅ Connected to MongoDB'))
+  .catch((error) => {
+    console.error('❌ MongoDB connection error:', error.message);
+    process.exit(1);
+  });
 
 // ======================
 // Data Model
@@ -70,7 +68,7 @@ app.use(express.json());
 app.get('/', (req, res) => {
   res.json({
     status: 'operational',
-    version: '1.0.0',
+    version: '1.0.1',
     endpoints: {
       trackAction: 'POST /v1/actions',
       getAnalytics: 'GET /v1/analytics/:userId',
@@ -126,7 +124,6 @@ app.get('/v1/analytics/:userId', async (req, res) => {
     const { userId } = req.params;
     const { period = '30' } = req.query;
 
-    // Validate input
     if (!userId) {
       return res.status(400).json({
         status: 'error',
@@ -134,13 +131,11 @@ app.get('/v1/analytics/:userId', async (req, res) => {
       });
     }
 
-    // Date filtering
     const periodDays = parseInt(period) || 30;
     const dateFilter = {
       $gte: new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000)
     };
 
-    // Analytics pipeline
     const stats = await UserAction.aggregate([
       {
         $match: {
@@ -165,7 +160,6 @@ app.get('/v1/analytics/:userId', async (req, res) => {
       }
     ]);
 
-    // Format response
     const result = stats.reduce((acc, curr) => ({
       ...acc,
       [curr.action]: {
@@ -226,7 +220,6 @@ const server = app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('🛑 Shutting down gracefully...');
   server.close(() => {
