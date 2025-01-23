@@ -8,15 +8,13 @@ require('dotenv').config();
 const app = express();
 
 // ======================
-// Security Middleware
+// Middleware
 // ======================
 app.use(helmet());
-app.use(cors({
-  origin: '*', // Allow all origins
-  methods: ['POST', 'GET'],
-  allowedHeaders: ['Content-Type']
-}));
+app.use(cors());
+app.use(express.json());
 
+// Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per window
@@ -27,9 +25,7 @@ app.use(limiter);
 // ======================
 // Database Setup
 // ======================
-mongoose.connect(process.env.MONGO_URI, {
-  autoIndex: process.env.NODE_ENV !== 'production'
-})
+mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch((error) => {
     console.error('MongoDB connection error:', error.message);
@@ -37,42 +33,13 @@ mongoose.connect(process.env.MONGO_URI, {
   });
 
 // ======================
-// Data Models
+// Routes
 // ======================
-const userActionSchema = new mongoose.Schema({
-  userId: {
-    type: String,
-    required: true,
-    minlength: 4,
-    maxlength: 100,
-    index: true
-  },
-  action: {
-    type: String,
-    enum: ['read', 'write'],
-    required: true
-  },
-  timestamp: { 
-    type: Date, 
-    default: Date.now,
-    index: true
-  }
+
+// Root route
+app.get('/', (req, res) => {
+  res.send('Usage Tracking Server is running!');
 });
-
-// Add indexes for common queries
-userActionSchema.index({ userId: 1, action: 1 });
-userActionSchema.index({ timestamp: -1 });
-
-const UserAction = mongoose.model('UserAction', userActionSchema);
-
-// ======================
-// Middleware
-// ======================
-app.use(express.json({ limit: '10kb' }));
-
-// ======================
-// API Endpoints
-// ======================
 
 // Track User Action (POST)
 app.post('/v1/actions', async (req, res) => {
