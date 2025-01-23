@@ -16,10 +16,12 @@ app.use(cors({
 app.use(express.json());
 
 // MongoDB Connection (removed duplicate mongoose import)
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('Connected to MongoDB'))
+  .catch((error) => {
+    console.error('MongoDB connection error:', error.message);
+    process.exit(1); // Exit process on connection failure
+  });
   .then(() => console.log('Connected to MongoDB'))
   .catch((error) => console.error('MongoDB connection error:', error));
 
