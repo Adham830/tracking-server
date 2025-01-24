@@ -228,4 +228,4 @@ process.on('SIGTERM', () => {
       process.exit(0);
     });
   });
-}); i want every user to have its own collection inside the data base
+});
