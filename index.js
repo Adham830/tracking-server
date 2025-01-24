@@ -106,45 +106,67 @@ app.post('/v1/actions', async (req, res) => {
   }
 });
 
-// Get user analytics
+// Get user analytics (simplified version)
 app.get('/v1/analytics/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const { period = '30' } = req.query;
 
-    if (!userId) return res.status(400).json({ error: 'User ID required' });
+    if (!userId) {
+      return res.status(400).json({
+        error: 'User ID required'
+      });
+    }
 
     const UserAction = createUserModel(userId);
-    const dateFilter = new Date(Date.now() - (parseInt(period) || 30) * 86400000);
+    const days = parseInt(period) || 30;
+    const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-    const stats = await UserAction.aggregate([
-      { $match: { timestamp: { $gte: dateFilter } } },
-      { $group: {
-          _id: '$action',
-          count: { $sum: 1 },
-          lastActivity: { $max: '$timestamp' }
-      }},
-      { $project: {
+    // Aggregation pipeline
+    const results = await UserAction.aggregate([
+      {
+        $match: {
+          timestamp: { $gte: startDate }
+        }
+      },
+      {
+        $group: {
+          _id: "$action",
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
           _id: 0,
-          action: '$_id',
-          count: 1,
-          lastActivity: 1
-      }}
+          action: "$_id",
+          count: 1
+        }
+      }
     ]);
 
-    const result = stats.reduce((acc, curr) => ({
-      ...acc,
-      [curr.action]: {
-        count: curr.count,
-        lastActivity: curr.lastActivity
-      }
-    }), { read: { count: 0, lastActivity: null }, write: { count: 0, lastActivity: null }});
+    // Format the response
+    const response = {
+      read: 0,
+      write: 0
+    };
 
-    res.json({ status: 'success', data: result });
+    results.forEach(item => {
+      response[item.action] = item.count;
+    });
+
+    res.json({
+      status: 'success',
+      userId,
+      periodDays: days,
+      actions: response
+    });
 
   } catch (error) {
     console.error('Analytics error:', error.message);
-    res.status(500).json({ status: 'error', message: 'Failed to fetch analytics' });
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to fetch analytics'
+    });
   }
 });
 
